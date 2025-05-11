@@ -29,16 +29,20 @@ showHelp() {
     echo "      Like '--nixpkgs-path', but for directly specifying the NixOS source"
     echo
     echo "    --start | -s"
-    echo "      Start all created containers"
-    echo "      Update running containers that have changed or restart them if '--restart-changed' was specified"
+    echo "      Start all created containers."
+    echo "      For running containers that have changed: if only the system configuration changed,"
+    echo "      it will be updated (switch-to-configuration); otherwise, it will be restarted."
+    echo "      If '--restart-changed' is also specified, this nuanced update behavior is overridden"
+    echo "      by the '--restart-changed' behavior (see below)."
     echo
     echo "    --update-changed | -u"
     echo "      Update running containers with a changed system configuration by running"
     echo "      'switch-to-configuration' inside the container."
-    echo "      Restart containers with a changed container configuration"
+    echo "      Restart containers with a changed container configuration (not just system path)."
     echo
     echo "    --restart-changed | -r"
-    echo "      Restart running containers that have changed"
+    echo "      For running containers that have changed: if only the system configuration changed,"
+    echo "      it will be updated (switch-to-configuration); otherwise, it will be restarted."
     echo
     echo "    --ssh"
     echo "      Generate SSH keys in /tmp and enable container SSH access."
@@ -880,7 +884,7 @@ echo
 
 if [[ $start || $update || $restart ]]; then
     toStart=()
-    toRestart=()
+    runningContainers=()
     # systemctl is-active fails when some containers are not active
     statuses=($(systemctl is-active $(getServiceNames ${allContainers[@]}))) || true
     for i in ${!statuses[@]}; do
@@ -898,27 +902,36 @@ if [[ $start || $update || $restart ]]; then
         systemctl start $(getServiceNames ${toStart[@]})
     fi
 
-    # Update or restart changed containers that are running
-    toRestart=($(comm -12 <(printf '%s\n' ${runningContainers[@]} | sort) \
-                          <(printf '%s\n' ${changedContainers[@]})))
-    if ((${#toRestart[@]} != 0)); then
-        if [[ ! $restart ]]; then
-            toUpdate=($(comm -12 <(printf '%s\n' ${toRestart[@]}) \
-                                 <(printf '%s\n' ${onlySystemChangedContainers[@]})))
-            toRestart=($(comm -23 <(printf '%s\n' ${toRestart[@]}) \
-                                  <(printf '%s\n' ${toUpdate[@]})))
-            if ((${#toUpdate[@]} != 0)); then
-                echo "Updating containers:"
-                printf '%s\n' ${toUpdate[@]}
-                echo
-                updateContainers ${toUpdate[@]}
-            fi
+    local running_and_changed_containers=()
+    if ((${#runningContainers[@]} > 0 && ${#changedContainers[@]} > 0)); then
+        running_and_changed_containers=($(comm -12 <(printf '%s\n' "${runningContainers[@]}" | sort) \
+                                                <(printf '%s\n' "${changedContainers[@]}" | sort)))
+    fi
+
+    if ((${#running_and_changed_containers[@]} != 0)); then
+        local containers_to_update=()
+        local containers_to_restart=()
+
+        if ((${#onlySystemChangedContainers[@]} > 0 )); then
+             containers_to_update=($(comm -12 <(printf '%s\n' "${running_and_changed_containers[@]}" | sort) \
+                                              <(printf '%s\n' "${onlySystemChangedContainers[@]}" | sort)))
         fi
-        if ((${#toRestart[@]} != 0)); then
-            echo "Restarting containers:"
-            printf '%s\n' ${toRestart[@]}
+       
+        containers_to_restart=($(comm -23 <(printf '%s\n' "${running_and_changed_containers[@]}" | sort) \
+                                          <(printf '%s\n' "${containers_to_update[@]}" | sort)))
+
+        if ((${#containers_to_update[@]} != 0)); then
+            echo "Updating containers:"
+            printf '%s\n' "${containers_to_update[@]}"
             echo
-            restartContainers ${toRestart[@]}
+            updateContainers "${containers_to_update[@]}"
+        fi
+
+        if ((${#containers_to_restart[@]} != 0)); then
+            echo "Restarting containers:"
+            printf '%s\n' "${containers_to_restart[@]}"
+            echo
+            restartContainers "${containers_to_restart[@]}"
         fi
     fi
 fi
