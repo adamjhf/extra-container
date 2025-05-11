@@ -902,15 +902,15 @@ if [[ $start || $update || $restart ]]; then
         systemctl start $(getServiceNames ${toStart[@]})
     fi
 
-    local running_and_changed_containers=()
+    running_and_changed_containers=()
     if ((${#runningContainers[@]} > 0 && ${#changedContainers[@]} > 0)); then
         running_and_changed_containers=($(comm -12 <(printf '%s\n' "${runningContainers[@]}" | sort) \
                                                 <(printf '%s\n' "${changedContainers[@]}" | sort)))
     fi
 
     if ((${#running_and_changed_containers[@]} != 0)); then
-        local containers_to_update=()
-        local containers_to_restart=()
+        containers_to_update=()
+        containers_to_restart=()
 
         if ((${#onlySystemChangedContainers[@]} > 0 )); then
              containers_to_update=($(comm -12 <(printf '%s\n' "${running_and_changed_containers[@]}" | sort) \
